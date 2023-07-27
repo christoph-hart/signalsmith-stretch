@@ -327,12 +327,18 @@ namespace spectral {
 		Results can be read/edited using `.spectrum`. */
 		template<class Data>
 		void analyse(Data &&data) {
+            
+            TRACE_EVENT("dsp", "analyse1");
+            
 			for (int c = 0; c < channels; ++c) {
 				fft.fft(data[c], spectrum[c]);
 			}
 		}
 		template<class Data>
 		void analyse(int c, Data &&data) {
+            
+            TRACE_EVENT("dsp", "analyse2");
+            
 			fft.fft(data, spectrum[c]);
 		}
 		/// Analyse without windowing
@@ -428,6 +434,7 @@ namespace spectral {
 		
 		void ensureValid(int i=0) {
 			Super::ensureValid(i, [&](int blockIndex) {
+                TRACE_DSP();
 				this->analyse(input.view(blockIndex - this->windowSize() + 1));
 				this->processSpectrum(blockIndex);
 			});

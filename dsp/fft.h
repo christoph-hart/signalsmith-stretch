@@ -527,6 +527,9 @@ template <typename Sample> struct JuceFFTWrapper
 
 		template<typename InputIterator, typename OutputIterator>
 		void ifft(InputIterator &&input, OutputIterator &&output) {
+            
+            TRACE_EVENT("dsp", "outerIFFT");
+            
 			size_t hSize = complexFft.size();
 			if (!modified) complexBuffer1[0] = {
 				input[0].real() + input[0].imag(),

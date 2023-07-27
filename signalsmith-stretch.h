@@ -323,11 +323,14 @@ private:
 	std::default_random_engine randomEngine;
 
 	void processSpectrum(bool newSpectrum, Sample timeFactor) {
+		TRACE_EVENT("dsp", "processSpectrum");
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
 		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
 		
 		if (newSpectrum) {
+			TRACE_EVENT_BEGIN("dsp", "newSpectrum");
+			
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
                 
@@ -344,6 +347,8 @@ private:
 				}
 #endif
 			}
+			
+			TRACE_EVENT_END ("dsp");
 		}
 
 		Sample smoothingBins = Sample(stft.fftSize())/stft.interval();
@@ -352,6 +357,7 @@ private:
 			findPeaks(smoothingBins);
 			updateOutputMap();
 		} else { // we're not pitch-shifting, so no need to find peaks etc.
+			TRACE_EVENT_BEGIN("dsp", "noPitchShift");
 			for (int c = 0; c < channels; ++c) {
 				Band *bins = bandsForChannel(c);
 				float* thisEnergy = energyForChannel(c);
@@ -363,8 +369,13 @@ private:
 			for (int b = 0; b < bands; ++b) {
 				outputMap[b] = {Sample(b), 1};
 			}
+			
+			TRACE_EVENT_END ("dsp");
 		}
 
+		
+		TRACE_EVENT_BEGIN("dsp", "preliminaryPrediction");
+		
 		// Preliminary output prediction from phase-vocoder
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
@@ -402,7 +413,11 @@ private:
 				}
 			}
 		}
-
+		
+		TRACE_EVENT_END ("dsp");
+	
+		TRACE_EVENT_BEGIN("dsp", "rePrediction");
+		
 		// Re-predict using phase differences between frequencies
 		for (int b = 0; b < bands; ++b) {
 			// Find maximum-energy channel and calculate that
@@ -459,7 +474,10 @@ private:
 					channelBin.output = channelPrediction.makeOutput(channelPhase);
 				}
 			}
-		}
+		
+		TRACE_EVENT_END ("dsp");
+		
+		
 
 		if (newSpectrum) {
 			for (auto &bin : channelBands) {
@@ -473,6 +491,7 @@ private:
 	
 	// Produces smoothed energy across all channels
 	void smoothEnergy(Sample smoothingBins) {
+		TRACE_EVENT("dsp", "smoothEnergy");
 		Sample smoothingSlew = 1/(1 + smoothingBins*Sample(0.5));
 		for (auto &e : energy) e = 0;
 		for (int c = 0; c < channels; ++c) {
@@ -512,6 +531,7 @@ private:
 	
 	// Identifies spectral peaks using energy across all channels
 	void findPeaks(Sample smoothingBins) {
+		TRACE_EVENT("dsp", "findPeaks");
 		smoothEnergy(smoothingBins);
 
 		peaks.resize(0);
@@ -537,6 +557,7 @@ private:
 	}
 	
 	void updateOutputMap() {
+		TRACE_EVENT("dsp", "updateOutputMap");
 		if (peaks.empty()) {
 			for (int b = 0; b < bands; ++b) {
 				outputMap[b] = {Sample(b), 1};
