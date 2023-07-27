@@ -1,6 +1,17 @@
 #ifndef SIGNALSMITH_STRETCH_H
 #define SIGNALSMITH_STRETCH_H
 
+#ifndef USE_JUCE_FFT
+#define USE_JUCE_FFT 1
+#endif
+
+#ifndef USE_VDSP_COMPLEX_MUL
+#define USE_VDSP_COMPLEX_MUL 1
+#endif
+
+#define ENERGY_AS_MEMBER 1
+
+
 #include "dsp/spectral.h"
 #include "dsp/delay.h"
 #include "dsp/perf.h"
@@ -169,9 +180,14 @@ struct SignalsmithStretch {
 					for (int c = 0; c < channels; ++c) {
 						auto channelBands = bandsForChannel(c);
 						auto &&spectrumBands = stft.spectrum[c];
+      
+                        perf::mulVec(spectrumBands, 1, rotCentreSpectrum.data(), 1, &channelBands[0].input, 4, bands);
+                        
+#if 0
 						for (int b = 0; b < bands; ++b) {
 							channelBands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
 						}
+#endif
 					}
 
 					if (inputInterval != stft.interval()) { // make sure the previous input is the correct distance in the past
@@ -192,9 +208,14 @@ struct SignalsmithStretch {
 						for (int c = 0; c < channels; ++c) {
 							auto channelBands = bandsForChannel(c);
 							auto &&spectrumBands = stft.spectrum[c];
+                            
+                            perf::mulVec(spectrumBands, 1, rotCentreSpectrum.data(), 1, &channelBands[0].prevInput, 4, bands);
+                            
+#if 0
 							for (int b = 0; b < bands; ++b) {
 								channelBands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
 							}
+#endif
 						}
 					}
 				}
@@ -345,11 +366,19 @@ private:
 		if (newSpectrum) {
 			for (int c = 0; c < channels; ++c) {
 				auto bins = bandsForChannel(c);
+                
+
+                perf::mulVec(&bins[0].prevOutput, 4, rotPrevInterval.data(), 1, &bins[0].prevOutput, 4, bands);
+                
+                perf::mulVec(&bins[0].prevInput, 4, rotPrevInterval.data(), 1, &bins[0].prevInput, 4, bands);
+                
+#if 0
 				for (int b = 0; b < bands; ++b) {
 					auto &bin = bins[b];
 					bin.prevOutput = signalsmith::perf::mul(bin.prevOutput, rotPrevInterval[b]);
 					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInterval[b]);
 				}
+#endif
 			}
 		}
 

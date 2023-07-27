@@ -1,6 +1,16 @@
 #ifndef SIGNALSMITH_DSP_PERF_H
 #define SIGNALSMITH_DSP_PERF_H
 
+#if USE_VDSP_COMPLEX_MUL
+#define Point DummyPoint
+#define Component DummyComponent
+#define MemoryBlock DummyMB
+#include <Accelerate/Accelerate.h>
+#undef Point
+#undef Component
+#undef MemoryBlock
+#endif
+
 #include <complex>
 
 namespace signalsmith {
@@ -23,6 +33,22 @@ namespace perf {
 	#endif
 	#endif
 
+
+
+
+    template<bool flipped, typename V>
+    SIGNALSMITH_INLINE std::complex<V> add(const std::complex<V> &a, const std::complex<V> &b) {
+        V aReal = complexReal(a), aImag = complexImag(a);
+        V bReal = complexReal(b), bImag = complexImag(b);
+        return flipped ? std::complex<V>{
+            aReal + bImag,
+            aImag - bReal
+        } : std::complex<V>{
+            aReal - bImag,
+            aImag + bReal
+        };
+    }
+
 	/** @brief Complex-multiplication (with optional conjugate second-arg), without handling NaN/Infinity
 		The `std::complex` multiplication has edge-cases around NaNs which slow things down and prevent auto-vectorisation.
 	*/
@@ -36,6 +62,34 @@ namespace perf {
 			a.real()*b.imag() + a.imag()*b.real()
 		};
 	}
+
+    template <bool conjugateSecond=false, typename V> void mulVec(const std::complex<V>* a, int strideA, const std::complex<V>* b, int strideB, std::complex<V>* c, int strideC, int numElements)
+    {
+        TRACE_DSP();
+        
+#if USE_VDSP_COMPLEX_MUL
+        
+        strideA *= 2;
+        strideB *= 2;
+        strideC *= 2;
+        
+        auto unconstA = const_cast<std::complex<V>*>(a);
+        auto unconstB = const_cast<std::complex<V>*>(b);
+        
+        DSPSplitComplex a_ = { reinterpret_cast<V*>(unconstA), reinterpret_cast<V*>(unconstA) + 1 };
+        DSPSplitComplex b_ = { reinterpret_cast<V*>(unconstB), reinterpret_cast<V*>(unconstB) + 1 };
+        DSPSplitComplex c_ = { reinterpret_cast<V*>(c), reinterpret_cast<V*>(c) + 1 };
+        
+        vDSP_zvmul(&a_, strideA, &b_, strideB, &c_, strideC, numElements, !conjugateSecond ? 1 : -1);
+        
+        
+#else
+        for(int i = 0; i < numElements; i++)
+        {
+            c[i * strideC] = mul<conjugateSecond, V>(a[i*strideA], b[i*strideB]);
+        }
+#endif
+    }
 
 /** @} */
 }} // signalsmith::perf::

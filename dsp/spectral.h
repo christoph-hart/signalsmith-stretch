@@ -111,10 +111,18 @@ namespace spectral {
 		void ifft(Input &&input, Output &&output) {
 			mrfft.ifft(input, output);
 			int size = mrfft.size();
-			Sample norm = 1/(Sample)size;
-			for (int i = 0; i < size; ++i) {
-				output[i] *= norm*fftWindow[i];
-			}
+            
+#if USE_JUCE_FFT
+            juce::FloatVectorOperations::multiply(output.data(), fftWindow.data(), size);
+#else
+            Sample norm = 1/(Sample)size;
+            
+            for (int i = 0; i < size; ++i) {
+                output[i] *= norm*fftWindow[i];
+            }
+#endif
+            
+            
 		}
 		/// Performs an IFFT (no windowing)
 		template<class Input, class Output>
