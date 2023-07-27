@@ -47,6 +47,7 @@ struct SignalsmithStretch {
 		inputBuffer.reset();
 		prevInputOffset = -1;
 		channelBands.assign(channelBands.size(), Band());
+		inputEnergy.assign(channelBands.size(), 0.0f);
 		silenceCounter = 2*stft.windowSize();
 	}
 
@@ -66,6 +67,7 @@ struct SignalsmithStretch {
 		inputBuffer.resize(channels, blockSamples + intervalSamples + 1);
 		timeBuffer.assign(stft.fftSize(), 0);
 		channelBands.assign(bands*channels, Band());
+		inputEnergy.assign(bands*channels, 0.0f);
 		
 		// Various phase rotations
 		rotCentreSpectrum.resize(bands);
@@ -286,9 +288,23 @@ private:
 	struct Band {
 		Complex input, prevInput{0};
 		Complex output, prevOutput{0};
-		Sample inputEnergy;
 	};
 	std::vector<Band> channelBands;
+	
+	std::vector<Sample> inputEnergy;
+	
+	float* energyForChannel(int channel)
+	{
+		return inputEnergy.data() + channel*bands;
+	}
+	
+	float getEnergy(float* energyData, int index)
+	{
+		if(index <= 0 || index >= bands) return 0.0f;
+		
+		return energyData[index];
+	}
+	
 	Band * bandsForChannel(int channel) {
 		return channelBands.data() + channel*bands;
 	}
@@ -390,8 +406,10 @@ private:
 		} else { // we're not pitch-shifting, so no need to find peaks etc.
 			for (int c = 0; c < channels; ++c) {
 				Band *bins = bandsForChannel(c);
+				float* thisEnergy = energyForChannel(c);
+				
 				for (int b = 0; b < bands; ++b) {
-					bins[b].inputEnergy = std::norm(bins[b].input);
+					thisEnergy[b] = std::norm(bins[b].input);
 				}
 			}
 			for (int b = 0; b < bands; ++b) {
@@ -402,11 +420,12 @@ private:
 		// Preliminary output prediction from phase-vocoder
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
+			float* energy = energyForChannel(c);
 			auto *predictions = predictionsForChannel(c);
 			for (int b = 0; b < bands; ++b) {
 				auto mapPoint = outputMap[b];
-				int lowIndex = std::floor(mapPoint.inputBin);
-				Sample fracIndex = mapPoint.inputBin - lowIndex;
+				int lowIndex = (int)(mapPoint.inputBin);
+				Sample fracIndex = mapPoint.inputBin - (Sample)lowIndex;
 
 				Prediction &prediction = predictions[b];
 				Sample prevEnergy = prediction.energy;
@@ -510,9 +529,11 @@ private:
 		for (auto &e : energy) e = 0;
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
+			float* thisEnergy = energyForChannel(c);
+			
 			for (int b = 0; b < bands; ++b) {
 				Sample e = std::norm(bins[b].input);
-				bins[b].inputEnergy = e; // Used for interpolating prediction energy
+				thisEnergy[b] = e; // Used for interpolating prediction energy
 				energy[b] += e;
 			}
 		}
