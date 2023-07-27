@@ -79,6 +79,7 @@ struct SignalsmithStretch {
 		smoothedEnergy.resize(bands);
 		outputMap.resize(bands);
 		channelPredictions.resize(channels*bands);
+		predictionEnergy.assign(channels*bands, Sample(0));
 	}
 
 	/// Frequency multiplier, and optional tonality limit (as multiple of sample-rate)
@@ -302,11 +303,10 @@ private:
 	std::vector<PitchMapPoint> outputMap;
 	
 	struct Prediction {
-		Sample energy = 0;
 		Complex input;
 		Complex shortVerticalTwist, longVerticalTwist;
 
-		Complex makeOutput(Complex phase) {
+		Complex makeOutput(Complex phase, Sample energy) {
 			Sample phaseNorm = std::norm(phase);
 			if (phaseNorm <= noiseFloor) {
 				phase = input; // prediction is too weak, fall back to the input
@@ -315,7 +315,16 @@ private:
 			return phase*std::sqrt(energy/phaseNorm);
 		}
 	};
+	
+	Sample* predictionEnergyForChannel(int c)
+	{
+		return predictionEnergy.data() + c*bands;
+	}
+	
 	std::vector<Prediction> channelPredictions;
+	std::vector<Sample> predictionEnergy;
+	
+	
 	Prediction * predictionsForChannel(int c) {
 		return channelPredictions.data() + c*bands;
 	}
@@ -381,22 +390,30 @@ private:
 			Band *bins = bandsForChannel(c);
 			float* energy = energyForChannel(c);
 			auto *predictions = predictionsForChannel(c);
+			auto *thisPredictionEnergy = predictionEnergyForChannel(c);
+			
 			for (int b = 0; b < bands; ++b) {
 				auto mapPoint = outputMap[b];
 				int lowIndex = (int)(mapPoint.inputBin);
 				Sample fracIndex = mapPoint.inputBin - (Sample)lowIndex;
 
 				Prediction &prediction = predictions[b];
-				Sample prevEnergy = prediction.energy;
-				prediction.energy = getFractional<&Band::inputEnergy>(c, lowIndex, fracIndex);
-				prediction.energy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy according to local stretch factor
+				Sample prevEnergy = thisPredictionEnergy[b];
+				
+				auto lo = getEnergy(energy, lowIndex);
+				auto hi = getEnergy(energy, lowIndex+1);
+				
+				auto newEnergy = hi * fracIndex + lo * (1.0f - fracIndex);
+				newEnergy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy
+				thisPredictionEnergy[b] = newEnergy;
+				
 				prediction.input = getFractional<&Band::input>(c, lowIndex, fracIndex);
 
 				auto &outputBin = bins[b];
 				Complex prevInput = getFractional<&Band::prevInput>(c, lowIndex, fracIndex);
 				Complex freqTwist = signalsmith::perf::mul<true>(prediction.input, prevInput);
 				Complex phase = signalsmith::perf::mul(outputBin.prevOutput, freqTwist);
-				outputBin.output = phase/(std::max(prevEnergy, prediction.energy) + noiseFloor);
+				outputBin.output = phase/(std::max(prevEnergy, newEnergy) + noiseFloor);
 
 				if (b > 0) {
 					Sample binTimeFactor = randomTimeFactor ? timeFactorDist(randomEngine) : timeFactor;
@@ -422,9 +439,9 @@ private:
 		for (int b = 0; b < bands; ++b) {
 			// Find maximum-energy channel and calculate that
 			int maxChannel = 0;
-			Sample maxEnergy = predictionsForChannel(0)[b].energy;
+			Sample maxEnergy = predictionEnergyForChannel(0)[b];
 			for (int c = 1; c < channels; ++c) {
-				Sample e = predictionsForChannel(c)[b].energy;
+				Sample e = predictionEnergyForChannel(c)[b];
 				if (e > maxEnergy) {
 					maxChannel = c;
 					maxEnergy = e;
@@ -461,7 +478,7 @@ private:
 				}
 			}
 
-			outputBin.output = prediction.makeOutput(phase);
+			outputBin.output = prediction.makeOutput(phase, predictionEnergyForChannel(maxChannel)[b]);
 			
 			// All other bins are locked in phase
 			for (int c = 0; c < channels; ++c) {
@@ -469,9 +486,11 @@ private:
 					auto &channelBin = bandsForChannel(c)[b];
 					auto &channelPrediction = predictionsForChannel(c)[b];
 					
+					auto &channelEnergy = predictionEnergyForChannel(c)[b];
+					
 					Complex channelTwist = signalsmith::perf::mul<true>(channelPrediction.input, prediction.input);
 					Complex channelPhase = signalsmith::perf::mul(outputBin.output, channelTwist);
-					channelBin.output = channelPrediction.makeOutput(channelPhase);
+					channelBin.output = channelPrediction.makeOutput(channelPhase, channelEnergy);
 				}
 			}
 		
