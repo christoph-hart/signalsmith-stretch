@@ -9,9 +9,6 @@
 #define USE_VDSP_COMPLEX_MUL 1
 #endif
 
-#define ENERGY_AS_MEMBER 1
-
-
 #include "dsp/spectral.h"
 #include "dsp/delay.h"
 #include "dsp/perf.h"
@@ -117,8 +114,10 @@ struct SignalsmithStretch {
 					silenceFirst = false;
 					for (auto &b : channelBands) {
 						b.input = b.prevInput = b.output = b.prevOutput = 0;
-						b.inputEnergy = 0;
 					}
+                    
+                    for(auto& s: inputEnergy)
+                        s = Sample(0);
 				}
 			
 				if (inputSamples > 0) {
@@ -185,12 +184,6 @@ struct SignalsmithStretch {
 						auto &&spectrumBands = stft.spectrum[c];
       
                         perf::mulVec(spectrumBands, 1, rotCentreSpectrum.data(), 1, &channelBands[0].input, 4, bands);
-                        
-#if 0
-						for (int b = 0; b < bands; ++b) {
-							channelBands[b].input = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
-						}
-#endif
 					}
 
 					if (inputInterval != stft.interval()) { // make sure the previous input is the correct distance in the past
@@ -213,12 +206,6 @@ struct SignalsmithStretch {
 							auto &&spectrumBands = stft.spectrum[c];
                             
                             perf::mulVec(spectrumBands, 1, rotCentreSpectrum.data(), 1, &channelBands[0].prevInput, 4, bands);
-                            
-#if 0
-							for (int b = 0; b < bands; ++b) {
-								channelBands[b].prevInput = signalsmith::perf::mul(spectrumBands[b], rotCentreSpectrum[b]);
-							}
-#endif
 						}
 					}
 				}
@@ -399,14 +386,6 @@ private:
                 perf::mulVec(&bins[0].prevOutput, 4, rotPrevInterval.data(), 1, &bins[0].prevOutput, 4, bands);
                 
                 perf::mulVec(&bins[0].prevInput, 4, rotPrevInterval.data(), 1, &bins[0].prevInput, 4, bands);
-                
-#if 0
-				for (int b = 0; b < bands; ++b) {
-					auto &bin = bins[b];
-					bin.prevOutput = signalsmith::perf::mul(bin.prevOutput, rotPrevInterval[b]);
-					bin.prevInput = signalsmith::perf::mul(bin.prevInput, rotPrevInterval[b]);
-				}
-#endif
 			}
 			
 			TRACE_EVENT_END ("dsp");
@@ -446,14 +425,14 @@ private:
 			
 			for (int b = 0; b < bands; ++b) {
 				auto mapPoint = outputMap[b];
-				int lowIndex = (int)(mapPoint.inputBin);
-				Sample fracIndex = mapPoint.inputBin - (Sample)lowIndex;
+				auto lowIndex = std::floor(mapPoint.inputBin);
+				Sample fracIndex = mapPoint.inputBin - lowIndex;
 
 				Prediction &prediction = predictions[b];
 				Sample prevEnergy = thisPredictionEnergy[b];
 				
-				auto lo = getEnergy(energy, lowIndex);
-				auto hi = getEnergy(energy, lowIndex+1);
+				auto lo = getEnergy(energy, (int)lowIndex);
+				auto hi = getEnergy(energy, (int)lowIndex+1);
 				
 				auto newEnergy = hi * fracIndex + lo * (1.0f - fracIndex);
 				newEnergy *= std::max<Sample>(0, mapPoint.freqGrad); // scale the energy
@@ -565,7 +544,9 @@ private:
 	void smoothEnergy(Sample smoothingBins) {
 		TRACE_EVENT("dsp", "smoothEnergy");
 		Sample smoothingSlew = 1/(1 + smoothingBins*Sample(0.5));
-		for (auto &e : energy) e = 0;
+        
+        memset(energy.data(), 0, sizeof(Sample) * energy.size());
+        
 		for (int c = 0; c < channels; ++c) {
 			Band *bins = bandsForChannel(c);
 			float* thisEnergy = energyForChannel(c);
@@ -576,9 +557,9 @@ private:
 				energy[b] += e;
 			}
 		}
-		for (int b = 0; b < bands; ++b) {
-			smoothedEnergy[b] = energy[b];
-		}
+        
+        memcpy(smoothedEnergy.data(), energy.data(), sizeof(Sample)*bands);
+        
 		Sample e = 0;
 		for (int repeat = 0; repeat < 2; ++repeat) {
 			for (int b = bands - 1; b >= 0; --b) {
