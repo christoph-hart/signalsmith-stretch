@@ -103,8 +103,60 @@ struct SignalsmithStretch {
 	
 	template<class Inputs, class Outputs>
 	void process(Inputs &&inputs, int inputSamples, Outputs &&outputs, int outputSamples) {
-		
-		
+		Sample totalEnergy = 0;
+		for (int c = 0; c < channels; ++c) {
+			auto &&inputChannel = inputs[c];
+			for (int i = 0; i < inputSamples; ++i) {
+				Sample s = inputChannel[i];
+				totalEnergy += s*s;
+			}
+		}
+		if (totalEnergy < noiseFloor) {
+			if (silenceCounter >= 2*stft.windowSize()) {
+				if (silenceFirst) {
+					silenceFirst = false;
+					for (auto &b : channelBands) {
+						b.input = b.prevInput = b.output = b.prevOutput = 0;
+						b.inputEnergy = 0;
+					}
+				}
+			
+				if (inputSamples > 0) {
+					// copy from the input, wrapping around if needed
+					for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
+						int inputIndex = outputIndex%inputSamples;
+						for (int c = 0; c < channels; ++c) {
+							outputs[c][outputIndex] = inputs[c][inputIndex];
+						}
+					}
+				} else {
+					for (int c = 0; c < channels; ++c) {
+						auto &&outputChannel = outputs[c];
+						for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
+							outputChannel[outputIndex] = 0;
+						}
+					}
+				}
+
+				// Store input in history buffer
+				for (int c = 0; c < channels; ++c) {
+					auto &&inputChannel = inputs[c];
+					auto &&bufferChannel = inputBuffer[c];
+					int startIndex = std::max<int>(0, inputSamples - stft.windowSize());
+					for (int i = startIndex; i < inputSamples; ++i) {
+						bufferChannel[i] = inputChannel[i];
+					}
+				}
+				inputBuffer += inputSamples;
+				return;
+			} else {
+				silenceCounter += inputSamples;
+			}
+		} else {
+			silenceCounter = 0;
+			silenceFirst = true;
+		}
+
 		for (int outputIndex = 0; outputIndex < outputSamples; ++outputIndex) {
 			stft.ensureValid(outputIndex, [&](int outputOffset) {
 				// Time to process a spectrum!  Where should it come from in the input?
