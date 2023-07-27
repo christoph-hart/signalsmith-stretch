@@ -493,6 +493,7 @@ private:
 					channelBin.output = channelPrediction.makeOutput(channelPhase, channelEnergy);
 				}
 			}
+		}
 		
 		TRACE_EVENT_END ("dsp");
 		
